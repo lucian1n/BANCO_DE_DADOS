@@ -1,0 +1,191 @@
+1. Esquema do Banco de Dados (PostgreSQL)
+
+-- Criação do banco (execute no terminal normal: sudo -u postgres psql)
+CREATE DATABASE companhia_aerea;
+\c companhia_aerea;
+
+-- Tabela AEROPORTO
+CREATE TABLE AEROPORTO (
+    id_aeroporto SERIAL PRIMARY KEY,
+    nome_aeroporto VARCHAR(100) NOT NULL,
+    sigla CHAR(3) UNIQUE NOT NULL,
+    cidade VARCHAR(100) NOT NULL,
+    uf CHAR(2) NOT NULL,
+    pais VARCHAR(50) NOT NULL
+);
+
+-- Tabela AERONAVE
+CREATE TABLE AERONAVE (
+    id_aeronave SERIAL PRIMARY KEY,
+    modelo VARCHAR(50) NOT NULL,
+    fabricante VARCHAR(50) NOT NULL,
+    capacidade INT NOT NULL
+);
+
+-- Tabela VOO
+CREATE TABLE VOO (
+    id_voo SERIAL PRIMARY KEY,
+    codigo_voo VARCHAR(10) UNIQUE NOT NULL,
+    horario_previsto_saida TIMESTAMP NOT NULL,
+    horario_previsto_chegada TIMESTAMP NOT NULL,
+    horario_real_saida TIMESTAMP,
+    horario_real_chegada TIMESTAMP,
+    status_voo VARCHAR(20) CHECK (status_voo IN ('EMBARQUE', 'EM_CURSO', 'ATRASADO', 'POUSADO', 'CANCELADO')),
+    portao_embarque VARCHAR(10),
+    terminal VARCHAR(10),
+    id_aeronave INT REFERENCES AERONAVE(id_aeronave),
+    id_aeroporto_origem INT REFERENCES AEROPORTO(id_aeroporto),
+    id_aeroporto_destino INT REFERENCES AEROPORTO(id_aeroporto)
+);
+
+-- Tabela POSICAO_VOO
+CREATE TABLE POSICAO_VOO (
+    id_posicao SERIAL PRIMARY KEY,
+    data_hora_posicao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    latitude DECIMAL(10, 8),
+    longitude DECIMAL(11, 8),
+    altitude INT,
+    velocidade INT,
+    percentual_trajeto DECIMAL(5, 2),
+    previsao_chegada_atualizada TIMESTAMP,
+    id_voo INT REFERENCES VOO(id_voo)
+);
+
+
+2. Dados Fictícios para Testes (PostgreSQL)
+
+INSERT INTO AEROPORTO (nome_aeroporto, sigla, cidade, uf, pais) VALUES
+('Aeroporto Internacional de Guarulhos', 'GRU', 'Guarulhos', 'SP', 'Brasil'),
+('Aeroporto Internacional do Galeão', 'GIG', 'Rio de Janeiro', 'RJ', 'Brasil'),
+('Aeroporto Internacional de Brasília', 'BSB', 'Brasília', 'DF', 'Brasil'),
+('Aeroporto Internacional de Confins', 'CNF', 'Belo Horizonte', 'MG', 'Brasil');
+
+INSERT INTO AERONAVE (modelo, fabricante, capacidade) VALUES
+('Boeing 737-800', 'Boeing', 189),
+('Airbus A320neo', 'Airbus', 174),
+('Embraer E195-E2', 'Embraer', 146);
+
+INSERT INTO VOO (codigo_voo, horario_previsto_saida, horario_previsto_chegada, horario_real_saida, status_voo, portao_embarque, terminal, id_aeronave, id_aeroporto_origem, id_aeroporto_destino) VALUES
+('GLO1001', CURRENT_TIMESTAMP - INTERVAL '1 hour', CURRENT_TIMESTAMP + INTERVAL '1 hour', CURRENT_TIMESTAMP - INTERVAL '55 minutes', 'EM_CURSO', 'B22', '2', 1, 1, 2),
+('TAM2002', CURRENT_TIMESTAMP - INTERVAL '2 hours', CURRENT_TIMESTAMP, NULL, 'ATRASADO', 'A10', '1', 2, 3, 1),
+('AZU3003', CURRENT_TIMESTAMP + INTERVAL '3 hours', CURRENT_TIMESTAMP + INTERVAL '4 hours', NULL, 'CANCELADO', NULL, NULL, 3, 4, 2),
+('GLO4004', CURRENT_TIMESTAMP - INTERVAL '5 hours', CURRENT_TIMESTAMP - INTERVAL '3 hours', CURRENT_TIMESTAMP - INTERVAL '5 hours', 'POUSADO', 'C05', '2', 1, 2, 3),
+('TAM5005', CURRENT_TIMESTAMP - INTERVAL '30 minutes', CURRENT_TIMESTAMP + INTERVAL '1.5 hours', CURRENT_TIMESTAMP - INTERVAL '25 minutes', 'EM_CURSO', 'B15', '2', 2, 1, 3);
+
+INSERT INTO POSICAO_VOO (data_hora_posicao, latitude, longitude, altitude, velocidade, percentual_trajeto, previsao_chegada_atualizada, id_voo) VALUES
+(CURRENT_TIMESTAMP - INTERVAL '40 minutes', -23.4356, -46.4731, 10000, 450, 15.00, CURRENT_TIMESTAMP + INTERVAL '58 minutes', 1),
+(CURRENT_TIMESTAMP - INTERVAL '20 minutes', -23.0012, -44.3312, 35000, 850, 45.00, CURRENT_TIMESTAMP + INTERVAL '55 minutes', 1),
+(CURRENT_TIMESTAMP - INTERVAL '5 minutes', -22.9123, -43.2012, 15000, 600, 85.50, CURRENT_TIMESTAMP + INTERVAL '10 minutes', 1),
+(CURRENT_TIMESTAMP - INTERVAL '15 minutes', -22.5034, -46.8921, 25000, 750, 20.00, CURRENT_TIMESTAMP + INTERVAL '1 hour 20 minutes', 5);
+
+3. As 4 Consultas Principais (PostgreSQL)
+
+-- 1. Obter todos os dados de um voo
+SELECT v.*, a.modelo, o.sigla AS origem, d.sigla AS destino
+FROM VOO v
+JOIN AERONAVE a ON v.id_aeronave = a.id_aeronave
+JOIN AEROPORTO o ON v.id_aeroporto_origem = o.id_aeroporto
+JOIN AEROPORTO d ON v.id_aeroporto_destino = d.id_aeroporto
+WHERE v.id_voo = 1;
+
+-- 2. Obter os dados de posição de um voo
+SELECT * FROM POSICAO_VOO WHERE id_voo = 1 ORDER BY data_hora_posicao DESC;
+
+-- 3. Obter uma lista dos voos em atraso
+SELECT codigo_voo, horario_previsto_saida FROM VOO WHERE status_voo = 'ATRASADO';
+
+-- 4. Obter uma lista dos voos cancelados
+SELECT codigo_voo, origem.sigla AS origem, destino.sigla AS destino 
+FROM VOO 
+JOIN AEROPORTO origem ON VOO.id_aeroporto_origem = origem.id_aeroporto
+JOIN AEROPORTO destino ON VOO.id_aeroporto_destino = destino.id_aeroporto
+WHERE status_voo = 'CANCELADO';
+
+
+4. Integração Python: PostgreSQL -> Redis
+
+import psycopg2
+import psycopg2.extras
+import redis
+
+# Conexão com os bancos
+pg_conn = psycopg2.connect(
+    dbname="companhia_aerea",
+    user="postgres",
+    password="unochapeco",
+    host="localhost"
+)
+redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+
+def atualizar_cache():
+    cursor = pg_conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    # Busca voos 'EM_CURSO'
+    query = """
+        SELECT v.id_voo, v.codigo_voo, o.sigla AS origem, d.sigla AS destino, 
+               v.horario_previsto_chegada, p.percentual_trajeto, p.previsao_chegada_atualizada
+        FROM VOO v
+        JOIN AEROPORTO o ON v.id_aeroporto_origem = o.id_aeroporto
+        JOIN AEROPORTO d ON v.id_aeroporto_destino = d.id_aeroporto
+        LEFT JOIN LATERAL (
+            SELECT percentual_trajeto, previsao_chegada_atualizada 
+            FROM POSICAO_VOO 
+            WHERE id_voo = v.id_voo 
+            ORDER BY data_hora_posicao DESC LIMIT 1
+        ) p ON true
+        WHERE v.status_voo = 'EM_CURSO';
+    """
+    cursor.execute(query)
+    voos_em_curso = cursor.fetchall()
+    
+    # Atualiza o Redis (Lista e Hashes)
+    redis_client.delete('lista_voos_em_curso')
+    for voo in voos_em_curso:
+        id_voo = str(voo['id_voo'])
+        redis_client.rpush('lista_voos_em_curso', id_voo)
+        
+        dados_voo = {
+            'codigo_voo': voo['codigo_voo'],
+            'origem': voo['origem'],
+            'destino': voo['destino'],
+            'previsao_chegada': str(voo['previsao_chegada_atualizada'] or voo['horario_previsto_chegada']),
+            'percentual_trajeto': str(voo['percentual_trajeto'] or 0) + '%'
+        }
+        redis_client.hset(f'voo_info:{id_voo}', mapping=dados_voo)
+        
+    print(f"Cache atualizado com sucesso! {len(voos_em_curso)} voos em curso sincronizados.")
+    cursor.close()
+
+if __name__ == "__main__":
+    atualizar_cache()
+
+
+
+5. Simulação do Site da Companhia (Redis)
+Arquivo: site_consulta.py
+import redis
+
+redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+
+def exibir_painel_site():
+    print("=== PAINEL DE VOOS EM CURSO (SITE) ===")
+    
+    ids_voos = redis_client.lrange('lista_voos_em_curso', 0, -1)
+    
+    if not ids_voos:
+        print("Nenhum voo em curso no momento.")
+        return
+
+    for id_voo in ids_voos:
+        dados = redis_client.hgetall(f'voo_info:{id_voo}')
+        print(f"Voo: {dados.get('codigo_voo')} | Rota: {dados.get('origem')} -> {dados.get('destino')} | "
+              f"Trajeto: {dados.get('percentual_trajeto')} | Chegada Est.: {dados.get('previsao_chegada')}")
+
+if __name__ == "__main__":
+    exibir_painel_site()
+Arquivo: site_consulta.py
+
+—-----------------------------repositório github—-------------------------------
+
+https://github.com/lucian1n/BANCO_DE_DADOS
+
